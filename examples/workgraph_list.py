@@ -15,13 +15,12 @@ def prepare_input(n, m):
     print("inputs", inputs)
     return inputs
 
-@task()
-def compare(index, inputs):
-    return index < len(inputs)
+@task(outputs=[{"name": "should_run"}, {"name": "index"}])
+def find_next(index, inputs):
+    index += 1
+    should_run = index < len(inputs)
+    return {"should_run": should_run, "index": index}
 
-@task()
-def update_index(index):
-    return index + 1
 
 @task.awaitable_builder()
 def submit_job(index, inputs, code_label):
@@ -42,22 +41,17 @@ def submit_job(index, inputs, code_label):
 
 
 wg = WorkGraph("test_submission_controller")
-wg.context = {"index": 0,
-              "should_run": True}
+wg.context = {"index": -1}
 prepare_input1 = wg.add_task(prepare_input, name="prepare_input", n=8, m=8)
-while1 = wg.add_task("While", name="While", conditions=["should_run"])
+find_next1 = wg.add_task(find_next, name="find_next", index="{{index}}",
+                            inputs=prepare_input1.outputs["result"])
+find_next1.set_context({"index": "index"})
+while1 = wg.add_task("While", name="While", conditions=find_next1.outputs["should_run"])
 submit_job1 = wg.add_task(submit_job, name="submit_job", code_label="add@localhost",
                         inputs=prepare_input1.outputs["result"],
-                        index="{{index}}")
-update_index1 = wg.add_task(update_index, name="update_index", index="{{index}}")
-update_index1.set_context({"result": "index"})
-update_index1.waiting_on.add(submit_job1)
-compare1 = wg.add_task(compare, name="compare", inputs=prepare_input1.outputs["result"],
-                       index = update_index1.outputs["result"])
-compare1.set_context({"result": "should_run"})
-while1.children.add([submit_job1, update_index1, compare1])
-wg.max_number_jobs = 30
-
+                        index=find_next1.outputs["index"])
+while1.children.add([submit_job1])
+wg.max_number_jobs = 20
 # wg.run()
 wg.submit()
 
